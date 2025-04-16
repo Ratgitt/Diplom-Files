@@ -120,6 +120,12 @@ CREATE TABLE educator (
     position VARCHAR(100)
 );
 
+-- Архивирование преподов и эдвайзеров (нужно для корректного отображения в иуп после увольнения):
+-- В момент удаления/деактивации преподавателя или эдвайзера:
+-- 1. Создать запись в архивной таблице.
+-- 2. Обновить все iep и iep_discipline_educator, где он использовался, заменив *_id на архивные.
+-- 3. После этого можно удалить или деактивировать оригинального пользователя.
+
 CREATE TABLE archived_educator (
     id INT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
     original_user_id INT,                  -- educator.user_id (может быть NULL, если удалён)
