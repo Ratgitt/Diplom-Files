@@ -1,25 +1,4 @@
 
-
-
-
--- registerUser() - Админы(сотрудники универа) создают учетные записи преподавателей и студентов.
---                  Учетные записи админов будут создаваться вручную разработчиками платформы.
--- authenticateUser() - индивидуально для всех пользователей
--- changePassword() - индивидуально для всех пользователей (старый + новый пароль)
--- resetPassword() - Отправка на почту временного кода для сброса пароля.
-
-PasswordResetToken { --пример токена сброса
-   long id;
-   string email;
-   uuid token;
-   timestamp expirationTime;
-}
-
-
-
-
-
-
 ------------------------------------------------------------------------------------------------------------------------
 -- Сущности:
 
@@ -34,6 +13,9 @@ CREATE TYPE study_form          AS ENUM ('FULL_TIME', 'PART_TIME');
 -- UNIVERSITY  Вузовский компонент     (ВК)
 -- ELECTIVE    Компонент по выбору     (КВ)
 CREATE TYPE choose_type         AS ENUM ('REQUIRED', 'UNIVERSITY', 'ELECTIVE');
+
+-- Тип для статуса апелляции
+CREATE TYPE appeal_status AS ENUM ('PENDING', 'APPROVED', 'REJECTED');
 
 -- Таблица групп образовательных программ
 CREATE TABLE group_educational_program (
@@ -140,10 +122,10 @@ CREATE TABLE educator (
 
 CREATE TABLE archived_educator (
     id INT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
-    original_user_id INT,                      -- educator.user_id (может быть NULL, если удалён)
-    full_name TEXT NOT NULL,                   -- Полное имя в виде, пригодном для отображения
-    degree VARCHAR(100),                               -- Учёная степень на момент архивации
-    position VARCHAR(100),                             -- Должность
+    original_user_id INT,                  -- educator.user_id (может быть NULL, если удалён)
+    full_name TEXT NOT NULL,               -- Полное имя в виде, пригодном для отображения
+    degree VARCHAR(100),                   -- Учёная степень на момент архивации
+    position VARCHAR(100),                 -- Должность
     archived_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
@@ -155,20 +137,184 @@ CREATE TABLE archived_adviser (
     archived_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
--- 1. Семестровый ИУП студента
+-- Семестровый ИУП студента
 CREATE TABLE iep (
     id INT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
     student_id INT NOT NULL REFERENCES student(id),
     educational_program_id INT NOT NULL REFERENCES educational_program(id),
-    start_year INT NOT NULL,
-    end_year INT NOT NULL,
+
+    -- достаточно одного значения, т.к. семестр проходит в рамках одного года (либо до нового года, либо после)
+    study_year INT NOT NULL,
+
     semester SMALLINT NOT NULL CHECK (semester IN (1, 2)),
     semester_credits INT NOT NULL,
 
     adviser_id INT REFERENCES adviser(id),
-    archived_adviser_id INT REFERENCES archived_adviser(id)
+    archived_adviser_id INT REFERENCES archived_adviser(id),
 
     created_at TIMESTAMP DEFAULT NOW()
+);
+
+-- В таблице хранятся копии данных дисциплины на момент создания ИУП
+-- на случай, если потом дисциплина будет переименована или модифицирована.
+CREATE TABLE iep_discipline (
+    id INT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    iep_id INT NOT NULL REFERENCES iep(id) ON DELETE CASCADE,
+    discipline_id INT NOT NULL REFERENCES discipline(id),
+    code VARCHAR(20) NOT NULL,             -- Копия на момент формирования
+    title VARCHAR(255) NOT NULL,           -- Копия на момент формирования
+    choose_type choose_type NOT NULL,
+    number_of_credits INT CHECK (number_of_credits > 0)
+);
+
+-- Преподаватели, назначенные на дисциплину в рамках ИУП
+CREATE TABLE iep_discipline_educator (
+    id INT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    iep_discipline_id INT NOT NULL REFERENCES iep_discipline(id) ON DELETE CASCADE,
+    
+    educator_id INT REFERENCES educator(id),
+    archived_educator_id INT REFERENCES archived_educator(id)
+);
+
+-- Таблица учебных групп
+CREATE TABLE study_group (
+    id INT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    name VARCHAR(50) NOT NULL,
+    discipline_id INT NOT NULL REFERENCES discipline(id) ON DELETE CASCADE,
+
+    -- достаточно одного значения, т.к. учебная группа
+    -- активна в рамках одного семестра (либо до нового года, либо после)
+    study_year INT NOT NULL,
+
+    semester SMALLINT NOT NULL CHECK (semester IN (1, 2)),
+    is_active BOOLEAN DEFAULT TRUE,
+    is_main_group BOOLEAN DEFAULT FALSE
+);
+
+-- Таблица связи студент-группа (Many-to-Many)
+CREATE TABLE student_study_group (
+    student_id INT NOT NULL REFERENCES student(id) ON DELETE CASCADE,
+    study_group_id INT NOT NULL REFERENCES study_group(id) ON DELETE CASCADE,
+    PRIMARY KEY (student_id, study_group_id)
+);
+
+-- Таблица связи преподаватель-группа (Many-to-Many)
+CREATE TABLE educator_study_group (
+    id INT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    educator_id INT NOT NULL REFERENCES educator(id) ON DELETE CASCADE,
+    study_group_id INT NOT NULL REFERENCES study_group(id) ON DELETE CASCADE,
+    UNIQUE (educator_id, study_group_id)
+);
+
+-- Таблица заданий
+CREATE TABLE assignment (
+    id INT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    educator_study_group_id INT NOT NULL REFERENCES educator_study_group(id) ON DELETE CASCADE,
+    title TEXT NOT NULL,
+    description TEXT,
+    deadline TIMESTAMP NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    is_active BOOLEAN DEFAULT TRUE
+);
+
+-- Вложения к заданиям
+CREATE TABLE assignment_files (
+    id INT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    assignment_id INT NOT NULL REFERENCES assignment(id) ON DELETE CASCADE,
+    file_url TEXT NOT NULL,
+    filename TEXT NOT NULL,
+    uploaded_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+-- Отправки заданий
+CREATE TABLE assignment_submission (
+    id INT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    assignment_id INT NOT NULL REFERENCES assignment(id) ON DELETE CASCADE,
+    student_id INT NOT NULL REFERENCES student(id) ON DELETE CASCADE,
+    submitted_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    comment TEXT,
+    reviewed_at TIMESTAMP,
+    grade INT CHECK (grade BETWEEN 0 AND 100),
+    feedback TEXT,
+    is_late BOOLEAN DEFAULT FALSE
+);
+
+-- Вложения к отправкам
+CREATE TABLE assignment_submission_files (
+    id INT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    assignment_submission_id INT NOT NULL REFERENCES assignment_submission(id) ON DELETE CASCADE,
+    file_url TEXT NOT NULL,
+    filename TEXT NOT NULL,
+    uploaded_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+-- Таблица тестов
+CREATE TABLE test (
+    id INT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    educator_study_group_id INT NOT NULL REFERENCES educator_study_group(id) ON DELETE CASCADE,
+    title TEXT NOT NULL,
+    start_time TIMESTAMP NOT NULL,
+    end_time TIMESTAMP NOT NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+-- Банк вопросов
+CREATE TABLE test_question_bank (
+    id INT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    test_id INT NOT NULL REFERENCES test(id) ON DELETE CASCADE,
+    question_text TEXT NOT NULL,
+    image_url TEXT,
+    max_options INT CHECK (max_options BETWEEN 1 AND 10),
+    correct_answers_count INT CHECK (correct_answers_count >= 1)
+);
+
+-- Варианты ответа на вопрос
+CREATE TABLE test_question_option (
+    id INT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    question_id INT NOT NULL REFERENCES test_question_bank(id) ON DELETE CASCADE,
+    option_text TEXT NOT NULL,
+    image_url TEXT,
+    is_correct BOOLEAN
+);
+
+-- Сессия прохождения теста студентом
+CREATE TABLE test_session (
+    id INT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    test_id INT NOT NULL REFERENCES test(id) ON DELETE CASCADE,
+    student_id INT NOT NULL REFERENCES student(id) ON DELETE CASCADE,
+    started_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    submitted_at TIMESTAMP,
+    score REAL,
+    is_completed BOOLEAN DEFAULT FALSE
+);
+
+-- 1. Вопросы, выданные студенту в тестовой сессии.
+-- 2. Перед прохождением для каждого студента рандомно выбирается
+--    подмножество из всех загруженных вопросов для конкретного теста
+CREATE TABLE test_session_question (
+    id INT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    session_id INT NOT NULL REFERENCES test_session(id) ON DELETE CASCADE,
+    question_id INT NOT NULL REFERENCES test_question_bank(id) ON DELETE CASCADE
+);
+
+-- Ответы на вопросы
+CREATE TABLE test_session_answer (
+    id INT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    session_question_id INT NOT NULL REFERENCES test_session_question(id) ON DELETE CASCADE,
+    selected_option_id INT NOT NULL REFERENCES test_question_option(id) ON DELETE CASCADE
+);
+
+-- Апелляции на результат теста
+CREATE TABLE test_appeal (
+    id INT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    test_session_id INT NOT NULL REFERENCES test_session(id) ON DELETE CASCADE,
+    submitted_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    reason TEXT NOT NULL,
+    response TEXT,
+    reviewed_by INT REFERENCES educator(id) ON DELETE SET NULL, -- educator_id
+    reviewed_at TIMESTAMP,
+    status appeal_status DEFAULT 'PENDING'
 );
 
 
@@ -176,94 +322,7 @@ CREATE TABLE iep (
 
 
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-virtual_group (
-   id
-   discipline_id
-   year_period (for ex. 2021-2022)
-   semester
-   is_active
-)
-
-student_virtual_group (
-   student_id
-   virtual_group_id
-)
-
-educator_virtual_group (
-   educator_id
-   virtual_group_id
-)
-
-group_educational_program (
-   id
-   code
-   title
-   years_of_study
-)
-
-educational_program (
-   id
-   group_educational_program_id
-   code
-   title
-   academic_degree (BACHELOR, MASTER, DOCTOR)
-   study_form (FULL_TIME, PART_TIME)
-   education_lang
-)
-
--- REQUIRED    Обязательный компонент  (ОК)
--- UNIVERSITY  Вузовский компонент     (ВК)
--- ELECTIVE    Компонент по выбору     (КВ)
-discipline (
-   id
-   educational_program_id
-
-   code
-   title
-   choose_type (REQUIRED, UNIVERSITY, ELECTIVE)
-   number_of_credits
-)
-
-CREATE TYPE iep_descipline AS (
-   discipline_id
-   choose_type
-   code
-   title
-   number_of_credits
-   educators int[] -- список educator_id
-)
-
--- ИУП - Individual Education Plan
-IEP (
-   student_id
-   educational_program_id
-   year_period
-   semester
-   semester_credits
-   adviser_id
-   discipline_list iep_descipline[]  -- "iep_discipline" custom type
-)
-
-
-
-
-
-
---------------------------------------
+------------------------------------------------------------------------------------------------------------------
 -- Планы:
 -- 1) ЗАДАНИЯ + ОЦЕНКИ + ТРАНСКРИПТ
 -- 2) РАСПИСАНИЕ + АКАДЕМ.КАЛЕНДАРЬ (график преподов, силлабусы, помещения и т.д.)
@@ -272,48 +331,8 @@ IEP (
 
 -- Добавить возможность просматривать syllabus по каждому предмету. Файл предварительно загружается преподавателем.
 
-4 типа занятий:
-- лекции
-- лабораторные
-- SIS
-- TSIS
-
-
-
----------------------------------------------------------------------------------------------------------------------------------------------------------------------
--- ЗАДАНИЯ
-
-assignment (
-   id
-   educator_id           -- Кто выдал задание
-   study_group_id        -- Какой учебной группе
-   title                 -- Название задания
-   description           -- Описание (текст/тема)
-   deadline              -- Дата и время дедлайна
-   created_at
-   updated_at
-   is_active             -- Чтобы можно было архивировать/скрывать
-);
-
--- Препод может загружать несколько вложений для задания
-assignment_files (
-   assignment_id
-   file_url        -- Например, PDF с заданием
-);
-
--- Отправки заданий студентами
-assignment_submission (
-   id
-   assignment_id
-   student_id
-   submitted_at
-   grade                 -- Можно null, если еще не оценено (оценка от 0 до 100)
-   feedback TEXT         -- Комментарий от преподавателя
-   is_late BOOLEAN       -- Было ли просрочено
-);
-
--- Можно загружать несколько файлов при сдаче дз
-assignment_submission_files (
-   assignment_submission_id
-   file_url              -- Загруженный файл
-);
+-- 4 типа занятий:
+-- - лекции
+-- - лабораторные
+-- - SIS
+-- - TSIS
