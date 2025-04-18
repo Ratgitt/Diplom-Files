@@ -243,7 +243,10 @@ CREATE TABLE assignment_submission (
     reviewed_at TIMESTAMP,
     grade INT CHECK (grade BETWEEN 0 AND 100),
     feedback TEXT,
-    is_late BOOLEAN DEFAULT FALSE
+    is_late BOOLEAN DEFAULT FALSE,
+
+    -- Гарантирует, что студент может отправить дз только один раз
+    UNIQUE(student_id, assignment_id)
 );
 
 -- Вложения к отправкам
