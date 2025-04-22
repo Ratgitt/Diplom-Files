@@ -215,13 +215,20 @@ CREATE TABLE educator_study_group (
 -- Таблица заданий
 CREATE TABLE assignment (
     id INT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
-    educator_study_group_id INT NOT NULL REFERENCES educator_study_group(id) ON DELETE CASCADE,
+    educator_id INT NOT NULL REFERENCES educator(id) ON DELETE SET NULL,
     title TEXT NOT NULL,
     description TEXT,
     deadline TIMESTAMP NULL,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     is_active BOOLEAN DEFAULT TRUE
+);
+
+-- Задание может назначаться нескольким группам
+CREATE TABLE assignment_study_group (
+    assignment_id INT NOT NULL REFERENCES assignment(id) ON DELETE CASCADE,
+    study_group_id INT NOT NULL REFERENCES study_group(id) ON DELETE CASCADE,
+    PRIMARY KEY (assignment_id, study_group_id)
 );
 
 -- Вложения к заданиям
@@ -238,12 +245,12 @@ CREATE TABLE assignment_submission (
     id INT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
     assignment_id INT NOT NULL REFERENCES assignment(id) ON DELETE CASCADE,
     student_id INT NOT NULL REFERENCES student(id) ON DELETE CASCADE,
-    submitted_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     comment TEXT,
+    submitted_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    is_late BOOLEAN DEFAULT FALSE,
     reviewed_at TIMESTAMP,
     grade INT CHECK (grade BETWEEN 0 AND 100),
     feedback TEXT,
-    is_late BOOLEAN DEFAULT FALSE,
 
     -- Гарантирует, что студент может отправить дз только один раз
     UNIQUE(student_id, assignment_id)
@@ -261,11 +268,18 @@ CREATE TABLE assignment_submission_files (
 -- Таблица тестов
 CREATE TABLE test (
     id INT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
-    educator_study_group_id INT NOT NULL REFERENCES educator_study_group(id) ON DELETE CASCADE,
+    educator_id INT NOT NULL REFERENCES educator(id) ON DELETE SET NULL,
     title TEXT NOT NULL,
     start_time TIMESTAMP NOT NULL,
     end_time TIMESTAMP NOT NULL,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+-- Тест может назначаться разным группам
+CREATE TABLE test_study_group (
+    test_id INT NOT NULL REFERENCES test(id) ON DELETE CASCADE,
+    study_group_id INT NOT NULL REFERENCES study_group(id) ON DELETE CASCADE,
+    PRIMARY KEY (test_id, study_group_id)
 );
 
 -- Банк вопросов
