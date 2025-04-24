@@ -75,7 +75,7 @@ CREATE TABLE adviser (
     id INT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
     firstname VARCHAR(100) NOT NULL,
     surname VARCHAR(100) NOT NULL,
-    lastname VARCHAR(100) NOT NULL,
+    lastname VARCHAR(100),
     phone_number VARCHAR(20),
     email VARCHAR(255) UNIQUE
 );
@@ -206,10 +206,9 @@ CREATE TABLE student_study_group (
 
 -- Таблица связи преподаватель-группа (Many-to-Many)
 CREATE TABLE educator_study_group (
-    id INT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
     educator_id INT NOT NULL REFERENCES educator(id) ON DELETE CASCADE,
     study_group_id INT NOT NULL REFERENCES study_group(id) ON DELETE CASCADE,
-    UNIQUE (educator_id, study_group_id)
+    PRIMARY KEY (educator_id, study_group_id)
 );
 
 -- Таблица заданий
@@ -232,7 +231,7 @@ CREATE TABLE assignment_study_group (
 );
 
 -- Вложения к заданиям
-CREATE TABLE assignment_files (
+CREATE TABLE assignment_file (
     id INT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
     assignment_id INT NOT NULL REFERENCES assignment(id) ON DELETE CASCADE,
     file_url TEXT NOT NULL,
@@ -257,7 +256,7 @@ CREATE TABLE assignment_submission (
 );
 
 -- Вложения к отправкам
-CREATE TABLE assignment_submission_files (
+CREATE TABLE assignment_submission_file (
     id INT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
     assignment_submission_id INT NOT NULL REFERENCES assignment_submission(id) ON DELETE CASCADE,
     file_url TEXT NOT NULL,
